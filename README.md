@@ -41,6 +41,8 @@ You'll need a kraken database.
     kraken2-build --db $kraken_db --build --threads $threads
     kraken2-build --db $kraken_db --clean --threads $threads
     ```
+* Note: if the --download library step fails with a message like: `rsync_from_ncbi.pl: unexpected FTP path (new server?) for https://ftp.ncbi.nlm.nih.gov/`, you can edit line 46 of covid-analysis/conda/env-kraken2/share/kraken2-2.1.2-3/libexec/rsync_from_ncbi.pl.
+  * change `^ftp` to `^https`.
 
 ## Usage
 This guide assumes you have a file structure like this, but the most important part is that you have a directory like `fastq_pass` containing individual files

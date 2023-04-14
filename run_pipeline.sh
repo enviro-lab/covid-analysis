@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --time=06:00:00
+#SBATCH --mem=8GB
 # load in the module that lets us run conda
 module load anaconda3 &>/dev/null
 set -eu
@@ -87,14 +88,17 @@ enviro_check()
     # fi
     echo "HUMAN_KRAKEN_DATABASE=$kraken_db"
 
-    # check for directories for all envs - if not there, make them
-    for env in pangolin nextclade nextflow artic kraken2 porechop homopolish; do
-        env_dir="$here/conda/env-$env"
-        if [[ ! -d $env_dir ]]; then
-            echo "Can't find $env_dir. Running prepare_envs.sh..."
-            "${here}/prepare_envs.sh"
-        fi
-    done
+    # # check for directories for all envs - if not there, make them
+    # for env in pangolin nextclade nextflow artic kraken2 porechop homopolish; do
+    #     env_dir="$here/conda/env-$env"
+    #     if [[ ! -d $env_dir ]]; then
+    #         echo "Can't find $env_dir. Running prepare_envs.sh..."
+    #         [[ ! -z ${SLURM_JOBID:-} ]] && slurm_cmd="srun --time=03:00:00 --mem=8GB $here/prepare_envs.sh" || slurm_cmd=""
+    #         ${slurm_cmd:-} \
+    #             "${here}/prepare_envs.sh"
+    #         break
+    #     fi
+    # done
 }
 
 main()
@@ -112,7 +116,7 @@ main()
     
     # run
     conda activate $here/conda/env-nextflow
-    nextflow run /projects/enviro_lab/scripts/covid_analysis/analyzeReads.nf \
+    nextflow run $here/analyzeReads.nf \
         --plate "$plate" \
         --fastqs "$fastqs" \
         --meta "$meta" \

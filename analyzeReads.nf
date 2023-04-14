@@ -1,55 +1,5 @@
 #! /usr/bin/env nextflow
 
-// // Convert relative path to absolute path
-// if (params.primerBedFile[0]=='/' || params.primerBedFile[0]=='~')
-// 	primerBedFile=params.primerBedFile
-// else
-// 	primerBedFile="$launchDir/$params.primerBedFile"
-
-
-// params.str = 'Hello world!'
-
-// process splitLetters {
-//     output:
-//         path 'chunk_*'
-
-//   """
-//   printf '${params.str}' | split -b 6 - chunk_
-//   """
-// }
-
-// process convertToUpper {
-//     input:
-//         path x
-//     output:
-//         stdout
-
-//     """
-//     cat $x | tr '[a-z]' '[A-Z]'
-//     """
-// }
-
-// process foo {
-//     publishDir '/data/chunks'
-
-//     output:
-//     path 'chunk_*'
-
-//     '''
-//     printf 'Hola' | split -b 1 - chunk_
-//     '''
-// }
-
-// process bar {
-//     output:
-//         stdout
-
-//     l = Channel.of("doing","something","1","2","3","4")
-
-//     """
-//     echo l
-//     """
-// }
 
 process cpu_example {
   cpus 8
@@ -70,33 +20,68 @@ def printUsage () {
 	println()
 }
 
+// Maybe look into this later - either nextflow or our hpc makes it impossible to to activate the environment despite being able to create it...
+// process checkEnvArtic {
+//     memory '8 GB'
+//     output:
+//         env artic_env_created
+//     shell:
+//     if (false == file("${projectDir}/conda/env-artic").exists()){
+//         '''
+//         echo "Creating env-artic"
+//         cd !{projectDir}
+//         [[ ! -d fieldbioinformatics ]] && git clone https://github.com/artic-network/fieldbioinformatics
+//         cd fieldbioinformatics
+//         conda env create -f environment.yml -p ../conda/env-artic
+//         # conda create -c bioconda -c conda-forge -c defaults -p !{projectDir}/conda/env-artic -y
+//         conda activate !{projectDir}/conda/env-artic
+//         # conda install -f environment.yml
+//         python setup.py install
+//         conda deactivate
+//         artic_env_created=true
+//         '''
+//     }
+// }
+
 process check4kraken {
     cpus 16
-    output:
-        env kraken_installed
-    
+    // output:
+    //     env kraken_installed
+    conda "${projectDir}/conda/env-kraken2"
     shell:
     '''
-    if [[ ! -d !{params.kraken_db} ]]; then
+    if [[ ! -f !{params.kraken_db}/taxo.k2d ]]; then
+    echo downloading taxonomy
     kraken2-build --db !{params.kraken_db} --download-taxonomy
+    echo downloading human db
     kraken2-build --db !{params.kraken_db} --download-library human
+    echo building kraken2 db
     kraken2-build --db !{params.kraken_db} --build --threads !{task.cpus}
+    echo cleaning kraken2 db
     kraken2-build --db !{params.kraken_db} --clean --threads !{task.cpus}
     fi
     cd "!{params.kraken_db}"
-    if [[ -d opts.k2d && -d hash.k2d && -d taxo.k2d ]]; then
+    if [[ -f opts.k2d && -f hash.k2d && -f taxo.k2d ]]; then
         kraken_installed=true
+        echo kraken_installed: $kraken_installed
+        echo "checking .command.err"
+        [[ -f .command.err ]] && mv .command.err .kraken_prep.log && touch .command.err
     else
         echo "Something went wrong with kraken install. Missing at least one db file"
         echo "ls !{params.kraken_db}"
         ls !{params.kraken_db}
         exit 1
     fi
+    # create .command.env file so it can be written to... countering wierd nextflow behavior
+    touch .command.env
+    echo done
     '''
 }
 
 process writeSampleDetails {
     // gather metadata from file and return
+    // input:
+    //     env artic_env_created
     output:
         path 'sample_*'
 
@@ -232,7 +217,7 @@ process kraken {
 
     input:
         tuple path('trimmed.fastq.gz'), env(sample_name), env(primer_scheme), env(barcode), env(scheme), env(scheme_version), env(scheme_dir)
-        env kraken_installed
+        // env kraken_installed
     
     output:
         // tuple path('kraken_trimmed.fastq.gz'), env(sample_name), env(primer_scheme), env(barcode), env(scheme), env(scheme_version), env(scheme_dir) //old
@@ -583,6 +568,8 @@ process create_spreadsheet {
 workflow {
     // checkTest()
     // Part 1: Artic pipeline
+    // Verify environments have been made or make them
+    // checkEnvArtic()
     // ensure kraken db exists, else download
     kraken_complete = check4kraken()
     // Step 1
