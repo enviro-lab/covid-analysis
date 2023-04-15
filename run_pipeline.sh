@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --time=06:00:00
 #SBATCH --mem=8GB
-# load in the module that lets us run conda
-# module load anaconda3 &>/dev/null
-# module purge
-# module load anaconda3
-# module list
 set -eu
 
 echo "Artic sequencing and strain anlysis pipeline"
@@ -103,9 +98,9 @@ main()
     if [[ ! -z ${group:-} ]]; then group_info="--group $group"; fi
     
     # run
-    module purge
-    module load anaconda3
-    module list
+    # load in the module that lets us run conda
+    module purge || true &>/dev/null
+    module load anaconda3 || true &>/dev/null
     conda activate $here/conda/env-nextflow
     nextflow run $here/analyzeReads.nf \
         --plate "$plate" \

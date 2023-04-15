@@ -98,7 +98,7 @@ def writeSpreadsheet(df,outdir,plate,which_report="All"):
         df.to_csv(outfile,index=False)
     else: print(f"{which_report}\n\tSkipping. No samples found in this batch for Source Lab: '{which_report}'")
     
-def writeSequencingReport(combo,outdir,plate,reportMap):
+def writeSequencingReport(combo:pd.DataFrame,outdir,plate,reportMap):
     """Writes df to csv"""
 
     # output file to csvs (split by source) and edit permissions
@@ -108,14 +108,16 @@ def writeSequencingReport(combo,outdir,plate,reportMap):
 
     # if there are multiple source labs, write a report file for each
     if "Source Lab" in combo.columns and len(combo["Source Lab"].unique()) > 1:
-        if reportMap == '':
+        print("reportMap:",reportMap)
+        if reportMap == '{}':
             # skip individual reports
             pass
-        elif reportMap == "{}":
+        elif reportMap == "":
             # create reports for each source lab
-            for source_lab in combo["Source Lab"].unique():
+            for source_lab in combo["Source Lab"].dropna().unique():
+                print("source_lab:",source_lab)
                 df = combo[combo["Source Lab"].str.contains(source_lab, na=False)]
-                writeSpreadsheet(df,outdir,plate)
+                writeSpreadsheet(df,outdir,plate,source_lab)
         else:
             # create reports for each group specified in reportMap
             reportMap = json.loads(reportMap.replace("'",'"'))
@@ -128,9 +130,10 @@ def writeSequencingReport(combo,outdir,plate,reportMap):
                 writeSpreadsheet(df,outdir,plate,which_report)
 
     # write out cumulative report (All)
-    outfile = outdir / f"Sequencing-report-{plate}-All.csv"
-    print(f"Writing out combined report\n\tOutfile: {outfile}")
-    combo.to_csv(outfile, index=False)
+    # outfile = outdir / f"Sequencing-report-{plate}-All.csv"
+    # print(f"Writing out combined report\n\tOutfile: {outfile}")
+    # combo.to_csv(outfile, index=False)
+    writeSpreadsheet(combo,outdir,plate,"All")
 
 def main():
     meta_file = Path(sys.argv[1])

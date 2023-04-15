@@ -535,7 +535,7 @@ process create_spreadsheet {
 
     shell:
     '''
-    echo running createSpreadsheet.py
+    echo "running createSpreadsheet.py:"
     !{projectDir}/createSpreadsheet.py \
         "!{params.meta}" \
         "!{pangolin_csv}" \
@@ -546,7 +546,7 @@ process create_spreadsheet {
         !{params.plate} \
         . \
         "!{params.reportMap}"
-    echo spreadsheet complete
+    echo spreadsheet complete!
    '''
 }
 
