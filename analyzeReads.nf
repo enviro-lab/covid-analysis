@@ -531,6 +531,8 @@ process create_spreadsheet {
     output:
         path 'Sequencing-report*.csv'
 
+    conda "$projectDir/conda/env-artic"
+
     shell:
     '''
     echo running createSpreadsheet.py

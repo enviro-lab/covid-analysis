@@ -2,7 +2,10 @@
 #SBATCH --time=06:00:00
 #SBATCH --mem=8GB
 # load in the module that lets us run conda
-module load anaconda3 &>/dev/null
+# module load anaconda3 &>/dev/null
+# module purge
+# module load anaconda3
+# module list
 set -eu
 
 echo "Artic sequencing and strain anlysis pipeline"
@@ -73,32 +76,17 @@ enviro_check()
         echo -e "To make your kraken database available, please\n export HUMAN_KRAKEN_DATABASE=/your/path/to/db\n or add kraken_db to the main nextflow.config\n or pass in the argument --kraken_db\n"
         exit 1
     fi
-    # # check whether `HUMAN_KRAKEN_DATABASE` exists
-    # if [[ -z ${HUMAN_KRAKEN_DATABASE:-} ]]; then
-    #     # if not provided, check nextflow.config
-    #     echo here? ${HUMAN_KRAKEN_DATABASE:-}
-    #     db=`grep kraken_db $here/nextflow.config | cut -d= -f2 | sed 's/"//g' | sed "s/'//g" | awk '{$1=$1};1'`
-    #     echo db: $db
-    #     if [[ -z ${db:-} ]]; then
-    #         echo -e "To make your kraken database available, please edit and run:\nexport HUMAN_KRAKEN_DATABASE=/your/path/to/db\n or add kraken_db to the main nextflow.config"; 
-    #         exit 1; 
-    #     elif [[ -d ${db:-} && -z ${HUMAN_KRAKEN_DATABASE:-} ]]; then
-    #         export HUMAN_KRAKEN_DATABASE="$db"
-    #     fi
-    # fi
     echo "HUMAN_KRAKEN_DATABASE=$kraken_db"
 
-    # # check for directories for all envs - if not there, make them
-    # for env in pangolin nextclade nextflow artic kraken2 porechop homopolish; do
-    #     env_dir="$here/conda/env-$env"
-    #     if [[ ! -d $env_dir ]]; then
-    #         echo "Can't find $env_dir. Running prepare_envs.sh..."
-    #         [[ ! -z ${SLURM_JOBID:-} ]] && slurm_cmd="srun --time=03:00:00 --mem=8GB $here/prepare_envs.sh" || slurm_cmd=""
-    #         ${slurm_cmd:-} \
-    #             "${here}/prepare_envs.sh"
-    #         break
-    #     fi
-    # done
+    # check for directories for all envs - if not there, make them
+    for env in pangolin nextclade nextflow artic kraken2 porechop homopolish; do
+        env_dir="$here/conda/env-$env"
+        if [[ ! -d $env_dir ]]; then
+            echo "Can't find $env_dir. Please run the following script to prepare all conda environments:"
+            echo "$here/prepare_envs.sh"
+            break
+        fi
+    done
 }
 
 main()
@@ -115,6 +103,9 @@ main()
     if [[ ! -z ${group:-} ]]; then group_info="--group $group"; fi
     
     # run
+    module purge
+    module load anaconda3
+    module list
     conda activate $here/conda/env-nextflow
     nextflow run $here/analyzeReads.nf \
         --plate "$plate" \
