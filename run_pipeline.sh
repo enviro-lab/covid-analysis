@@ -68,7 +68,7 @@ enviro_check()
     fi
     # verify the file exists
     if [[ -z ${kraken_db:-}  && ! projectDir = ${kraken_db:-} ]]; then
-        echo -e "To make your kraken database available, please\n export HUMAN_KRAKEN_DATABASE=/your/path/to/db\n or add kraken_db to the main nextflow.config\n or pass in the argument --kraken_db\n"
+        echo -e "To make your kraken database available, please do one of the following:\n * export HUMAN_KRAKEN_DATABASE=/your/path/to/db,\n * edit `kraken_db` in the main nextflow.config, or\n * pass in the argument `--kraken_db /your/path/to/db`\n"
         exit 1
     fi
     echo "HUMAN_KRAKEN_DATABASE=$kraken_db"
