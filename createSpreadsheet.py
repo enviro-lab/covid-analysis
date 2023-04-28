@@ -6,10 +6,14 @@ import pandas as pd
 from pathlib import Path
 import json
 
+reference_length = 29903
+
 def getMetaDF(meta_file):
     """Returns metadata as df"""
 
     df = pd.read_csv(meta_file)
+    if not "Seq ID" in df.columns:
+        raise Exception(f"Missing required field 'Seq ID' from metadata file '{meta_file}'")
     # finalize some column names
     newCols = {"Seq ID":"Sample #","Ct N1":"Ct N gene","Qubit reading":"post-ARTIC Qubit (ng/ul)","Zip Code":"Zip code","Sample date":"Test date"}
     df = df.rename(columns=newCols)
@@ -20,7 +24,8 @@ def getMetaDF(meta_file):
     for col in cols:
         if "date" in col.lower():
             df[col] = pd.to_datetime(df[col])
-    print(f"metadata\t{len(df)}")
+    print(f"Metadata\t{len(df)}")
+    # print(df)
     return df
 
 def get_ambig(x):
@@ -47,8 +52,8 @@ def getPangoDF(pango_file):
         "note":"pango_note",
         "qc_notes":"Ambiguous_content"})
     df["Ambiguous_content"] = df["Ambiguous_content"].apply(lambda x: get_ambig(x)) # convert from "Ambiguous_content:0.02" --> 0.02
-    print(f"pangolin\t{len(df)}")
-    print(df)
+    print(f"Pangolin\t{len(df)}")
+    # print(df)
     return df
 
 def getNextcladeDF(nextclade_file,nextclade_version):
@@ -65,19 +70,18 @@ def getNextcladeDF(nextclade_file,nextclade_version):
         "aaSubstitutions":"AA Substitutions",
         "substitutions":"Nucleotide Substitutions"})
     df = df.drop_duplicates()
-    if "Total Missing" in df.columns:
-        df["Total Missing"] = df["Total Missing"].astype('Int64')
+
     df["nextclade_version"] = nextclade_version
-    print(f"nextclade\t{len(df)}")
-    print(df)
+    print(f"Nextclade\t{len(df)}")
+    # print(df)
     return df
 
-def getReadsCountsDF(reads_file,counts="Reads on Barcode"):
+def getReadsCountsDF(reads_file,counts,title):
     """Returns read counts by barcode as df"""
 
     df = pd.read_csv(reads_file,header=None,names=["Sample #",counts])
-    print(f"reads\t\t{len(df)}")
-    print(df)
+    print(f"{title}\t{len(df)}")
+    # print(df)
     return df
 
 def checkDfs(dfs):
@@ -86,6 +90,9 @@ def checkDfs(dfs):
     for name,df in dfs.items():
         if df.empty:
             raise Exception(f"No data found in {name} df.")
+        if "Sample #" not in df.columns:
+            raise Exception(f"'Sample #' field not present in {name} df")
+
 
 def writeSpreadsheet(df,outdir,plate,which_report="All"):
     """Writes a spreadsheet for individual source labs"""
@@ -101,7 +108,7 @@ def writeSpreadsheet(df,outdir,plate,which_report="All"):
 def writeSequencingReport(combo:pd.DataFrame,outdir,plate,reportMap):
     """Writes df to csv"""
 
-    # output file to csvs (split by source) and edit permissions
+    # output file to csvs (split by source)
     print(f"\nWriting out spreadsheet CSVs:")
     # this stuff vvv is mirrored in Prepare-Corvaseq.py -- ensure it stays updated together
     # reportMap = {"Campus":["Campus",None],"Mecklenburg":["Starmed|StarMed","MCPH"],"StarMed":["Starmed|StarMed",None],"Mission":["Mission",None]}            # EDIT if more source labs added
@@ -135,6 +142,20 @@ def writeSequencingReport(combo:pd.DataFrame,outdir,plate,reportMap):
     # combo.to_csv(outfile, index=False)
     writeSpreadsheet(combo,outdir,plate,"All")
 
+def setDefaults(combo):
+    """Fills na for important fields"""
+
+    if "Total Missing" in combo.columns:
+        print("Filling NA for Total Missing")
+        combo["Total Missing"] = combo["Total Missing"].fillna(reference_length).astype('Int64')
+    if "Nextstrain Status" in combo.columns:
+        print("Filling NA for Nextstrain Status")
+        combo["Nextstrain Status"] = combo["Nextstrain Status"].fillna("bad")
+    if "Pangolin QC" in combo.columns:
+        print("Filling NA for Pangolin QC")
+        combo["Pangolin QC"] = combo["Pangolin QC"].fillna("fail")
+    return combo
+
 def main():
     meta_file = Path(sys.argv[1])
     pangolin_file = Path(sys.argv[2])
@@ -163,20 +184,30 @@ def main():
     meta_df = getMetaDF(meta_file)
     pangolin_df = getPangoDF(pangolin_file)
     nextclade_df = getNextcladeDF(nextclade_file,nextclade_version)
-    reads_df = getReadsCountsDF(read_counts_file)
-    raw_reads_df = getReadsCountsDF(raw_read_counts_file,"read_counts_raw")
+    reads_df = getReadsCountsDF(read_counts_file,"Reads on Barcode","Reads filt")
+    raw_reads_df = getReadsCountsDF(raw_read_counts_file,"read_counts_raw","Reads raw")
 
     # ensure all dfs have data
     dfs = {"Metadata":meta_df,"Nextclade":nextclade_df,"Pangolin":pangolin_df,"read counts":reads_df,"raw read counts":raw_reads_df}
     checkDfs(dfs)
-    # for df in dfs.values():
-    #     df["Sample #"] = df["Sample #"].astype(str)
+    for name,df in dfs.items():
+        print(name)
+        print(df.columns)
+        print(df)
 
     # merge dfs
     combo:pd.DataFrame = meta_df.merge(pangolin_df,on="Sample #",how="outer"
                 ).merge(nextclade_df,on="Sample #",how="outer"
                 ).merge(reads_df,on="Sample #",how="outer"
                 ).merge(raw_reads_df,on="Sample #",how="outer")
+
+    print(len(combo))
+
+    # set defaults for samples that lacked fastas to go to nextclade/pangolin
+    combo = setDefaults(combo)
+    
+    print(len(combo))
+    print(combo[["Sample #","Pango lineage","Total Missing"]])
 
     # write out results
     writeSequencingReport(combo,outdir,plate,reportMap)

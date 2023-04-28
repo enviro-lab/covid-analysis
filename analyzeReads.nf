@@ -90,6 +90,7 @@ process writeSampleDetails {
     shell:
     '''
     #!/usr/bin/env python
+
     import pandas as pd
     # read in metadata
     df = pd.read_csv("!{params.meta}")
@@ -97,9 +98,21 @@ process writeSampleDetails {
     ps_col = [col for col in df.columns if "primer" in col.lower()][0]
     bc_col = [col for col in df.columns if "barcode" in col.lower()][0]
 
+    # read in primer data
+    primer_df = pd.read_csv("!{params.scheme_details}")
+    if primer_df.isnull().values.any():
+        raise Exception(str(primer_df)+"Primer scheme details cannot have any null values. Please check the file '%s'" % "!{params.scheme_details}")
+
+    # make sure all primers provided exist in scheme_details file
+    extras = set(df[ps_col].unique()) - set(primer_df["primer_scheme"].unique())
+    if extras:
+        print(f"The following primer(s) don't exist in '!{params.scheme_details}' but appear in '!{params.meta}':")
+        print(extras)
+        exit(1)
+
     # merge in scheme info
     df = df.merge(
-        pd.read_csv("!{params.scheme_details}"),
+        primer_df,
         left_on=ps_col,
         right_on="primer_scheme",
         how="left"
@@ -249,6 +262,7 @@ process kraken {
 
 process porechop {
     cpus 16
+    memory '32 GB'
     publishDir "$params.out/porechop_kraken_trimmed", mode: 'copy'
     // TODO: set_permissions
 
@@ -270,10 +284,10 @@ process porechop {
         -o "${sample_name}_${barcode}.fastq.gz" \
         -t !{task.cpus} \
         --check_reads 5000 \
-        --min_split_read_size 300 \
-            > /dev/null 2>&1
+        --min_split_read_size 300
     '''
-        // #    | grep -v $'\r' > "${porechop_log_dir}/${run_name}.log"
+            // | grep -v $'\r'
+        // #     > /dev/null 2> /dev/null
 }
 
 process count_final_reads {
@@ -328,27 +342,42 @@ process minion {
     # set thread count
     # if [[ -n ${SLURM_CPUS_ON_NODE:-} ]]; then threads=${SLURM_CPUS_ON_NODE}; else threads=`nproc`; fi
 
+    if [[ ${scheme_dir} = ./primer_schemes ]]; then scheme_dir=!{projectDir}/primer_schemes; fi
     # run up to 2 times
     minion_complete=false; re=""
 	for run in 1 2; do
+        echo CMD: artic minion --medaka --medaka-model r941_prom_high_g360 --no-longshot --normalise 400 --threads !{task.cpus} --scheme-directory ${scheme_dir} --scheme-version ${scheme_version} --read-file "final_trimmed.fastq.gz" "${scheme}" "${sample_name}"
 		if [[ $run = 2 ]]; then re="re"; else re=""; fi
 		if [[ ${minion_complete} = false ]]; then
-        ( artic minion \
-            --medaka \
-            --medaka-model r941_prom_high_g360 \
-            --no-longshot \
-            --normalise 400 \
-            --threads !{task.cpus} \
-            --scheme-directory ${scheme_dir} \
-            --scheme-version ${scheme_version} \
-            --read-file "final_trimmed.fastq.gz" \
-            "${scheme}" \
-            "${sample_name}"
-        ) && minion_complete=true || minion_complete=false
+            ( artic minion \
+                --medaka \
+                --medaka-model r941_prom_high_g360 \
+                --no-longshot \
+                --normalise 400 \
+                --threads !{task.cpus} \
+                --scheme-directory ${scheme_dir} \
+                --scheme-version ${scheme_version} \
+                --read-file "final_trimmed.fastq.gz" \
+                "${scheme}" \
+                "${sample_name}" \
+            ) && minion_complete=true || minion_complete=false
+            echo "minion_complete: $minion_complete"
+
+            # check for likely errors or else let it try again
+            if grep -q 'could not find primer scheme' .command.log ; then
+                echo "Primer scheme (${scheme}, ${scheme_version}) couldn't be found in ${scheme_dir}"
+                exit 1
+            fi
+
+        else echo "skipping this ${re}run of artic minion"
         fi
     done
 
-    [[ ${minion_complete} = false ]] && printf '' > ${sample_name}.consensus.fasta
+    if tail -5 .command.log | grep -q 'Command failed:artic_vcf_filter' ; then
+        echo "Detected fail by artic_vcf_filter"
+    fi
+
+    [[ ${minion_complete} = false ]] && echo "writing empty consensus fasta" && printf '' > ${sample_name}.consensus.fasta
     '''
 }
 
@@ -373,7 +402,12 @@ process homopolish {
     # set thread count
     # if [[ -n ${SLURM_CPUS_ON_NODE:-} ]]; then threads=${SLURM_CPUS_ON_NODE}; else threads=`nproc`; fi
 
+    echo "sample_name: ${sample_name}"
+    echo "barcode: ${barcode}"
+    echo "minion_complete: ${minion_complete}"
+
     if [[ ${minion_complete} = true ]]; then
+        echo CMD: homopolish polish -a "!{consensus_fasta}" -t !{task.cpus} -m R9.4.pkl -o . --local_DB_path "!{projectDir}/homopolish_db.fasta"
         ( homopolish polish \
             -a "!{consensus_fasta}" \
             -t !{task.cpus} \
@@ -381,28 +415,40 @@ process homopolish {
             -o . \
             --local_DB_path "!{projectDir}/homopolish_db.fasta"
         ) && homopolish_successful=true || homopolish_successful=false
+
+        # choose best consensus as final.consensus.fasta (prioritize homopolish fasta if exists)
+        if [[ -f ${sample_name}_homopolished.fasta && `cat ${sample_name}_homopolished.fasta | wc -l` -ge 2 ]]; then
+            echo using homopolished fasta
+            best_fasta="${sample_name}_homopolished.fasta"
+        elif [[ -f "!{consensus_fasta}" && `cat ${consensus_fasta} | wc -l` -ge 2 ]]; then
+            echo "using artic's fasta"
+            best_fasta="!{consensus_fasta}"
+        else
+            # write empty fasta if none exist
+            echo "minion and homopolish failed - creating empty final fasta"
+            printf '' > "${sample_name}.final.consensus.fasta"
+        fi
+
+        if [[ ! -z ${best_fasta:-} ]]; then
+            # simplify header and copy best fasta sequence to final fasta
+            echo ">${sample_name}" > "${sample_name}.final.consensus.fasta"
+            sed '1d' "${best_fasta}" >> "${sample_name}.final.consensus.fasta"
+        fi
+
     else
+        echo "minion failed - creating empty homopolish and final fasta"
         touch "${sample_name}_homopolished.fasta"
-    fi
-
-    [[ $? -eq 0 ]] && mv .command.err .homopolish.log && touch .command.err
-
-    # choose best consensus to final.consensus.fasta (prioritize homopolish fasta if exists)
-    if [[ -f ${sample_name}_homopolished.fasta ]]; then
-        echo using homopolished fasta
-        best_fasta="${sample_name}_homopolished.fasta"
-    elif [[ -f "!{consensus_fasta}" ]]; then
-        echo "using artic's fasta"
-        best_fasta="!{consensus_fasta}"
-    else
-        # write empty fasta if none exist
         printf '' > "${sample_name}.final.consensus.fasta"
-        return 0
     fi
 
-    # simplify header while copying best fasta to final fasta
-    echo ">${sample_name}" > "${sample_name}.final.consensus.fasta"
-    sed '1d' "${best_fasta}" >> "${sample_name}.final.consensus.fasta"
+    if [[ -f .command.err && `cat .command.err | wc -l` -gt 0 ]]; then
+        mv .command.err homopolish.log
+        touch .command.err
+        echo "sample_name=${sample_name}" > .command.env
+    fi
+
+    echo "made it to the end"
+    pwd
     '''
 }
 
@@ -535,7 +581,7 @@ process create_spreadsheet {
 
     shell:
     '''
-    echo "running createSpreadsheet.py:"
+    echo "Running createSpreadsheet.py:"
     !{projectDir}/createSpreadsheet.py \
         "!{params.meta}" \
         "!{pangolin_csv}" \
@@ -546,7 +592,7 @@ process create_spreadsheet {
         !{params.plate} \
         . \
         "!{params.reportMap}"
-    echo spreadsheet complete!
+    echo done writing
    '''
 }
 

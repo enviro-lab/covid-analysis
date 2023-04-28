@@ -112,6 +112,7 @@ main()
 
     # set some permissions
     if [[ ! -z ${group:-} ]]; then
+        set +e
         echo Changing permissions...
         chgrp -R enviro_lab work output slurm* *.csv .next*
         chmod -R g+w work output slurm* *.csv .next*
